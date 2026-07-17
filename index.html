@@ -164,6 +164,42 @@
     flex:1; padding:13px; border-radius:9px; font-size:15px; font-weight:700;
     border:1px solid var(--border-soft); background:transparent; color:var(--text-dim); cursor:pointer;
   }
+
+  .practice-box{ margin-top:16px; }
+  .practice-label{ font-size:14px; color:var(--amber); font-weight:700; margin-bottom:8px; letter-spacing:1px; }
+  .practice-box textarea{
+    width:100%;
+    min-height:100px;
+    background:rgba(255,255,255,0.06);
+    border:1.5px solid var(--border-soft);
+    border-radius:10px;
+    padding:14px;
+    font-size:17px;
+    line-height:1.6;
+    color:var(--text-main);
+    font-family:inherit;
+    resize:vertical;
+    box-sizing:border-box;
+  }
+  .practice-box textarea:focus{ outline:none; border-color:var(--amber); }
+  .practice-box textarea::placeholder{ color:var(--text-dim); }
+  .my-answer-text{
+    font-size:17px; line-height:1.65; color:var(--cyan); white-space:pre-line;
+    background:rgba(255,255,255,0.04); border-radius:8px; padding:12px;
+    border:1px solid rgba(255,255,255,0.1);
+  }
+
+  .swipe-hint{
+    text-align:center;
+    font-size:12px;
+    color:var(--text-dim);
+    margin-top:10px;
+    letter-spacing:2px;
+    opacity:0.6;
+  }
+  .card{ touch-action: pan-y; }
+  .card.swiping{ transition:none; }
+  .card.swipe-return{ transition: transform 0.25s ease; }
   .self-check button.master.on{ background:var(--green-dim); border-color:var(--green); color:var(--green); }
   .self-check button.weak.on{ background:var(--red-dim); border-color:var(--red); color:var(--red); }
 
@@ -707,7 +743,8 @@ let state = {
   filter: 'all',         // all | weak | star
   revealed: {},          // {id: true}
   stars: {},             // {id: true}
-  status: {}             // {id: 'master' | 'weak'}
+  status: {},            // {id: 'master' | 'weak'}
+  drafts: {}             // {id: '我的练习作答文字'}
 };
 
 function visibleList(){
@@ -748,12 +785,19 @@ function render(){
   const starred = !!state.stars[item.id];
   const status = state.status[item.id];
 
-  let html = '<div class="card">';
+  const draftVal = state.drafts[item.id] || '';
+
+  let html = '<div class="card" id="questionCard">';
   html += '<button class="star-btn ' + (starred?'on':'') + '" data-star="'+item.id+'">' + (starred?'★':'☆') + '</button>';
   html += '<div class="card-tag"><span class="qnum mono">Q'+item.id+'</span><span class="page-ref mono">'+ (item.page||'') +'</span></div>';
   html += '<div class="q-text">'+ escapeHtml(item.q) +'</div>';
 
   if(isRevealed){
+    if(draftVal){
+      html += '<div class="divider"></div>';
+      html += '<div class="label">我的作答</div>';
+      html += '<div class="my-answer-text">'+ escapeHtml(draftVal) +'</div>';
+    }
     html += '<div class="divider"></div>';
     html += '<div class="label">参考答案</div>';
     html += '<div class="answer-text">'+ escapeHtml(item.a) +'</div>';
@@ -767,19 +811,37 @@ function render(){
     html += '<button class="weak '+(status==='weak'?'on':'')+'" data-status="weak" data-id="'+item.id+'">✗ 还不熟</button>';
     html += '</div>';
   } else {
+    html += '<div class="practice-box">';
+    html += '<div class="practice-label">✏️ 先写下你的答案（选填）</div>';
+    html += '<textarea id="practiceInput" placeholder="在这里练习作答，再点下方查看答案对比…">'+ escapeHtml(draftVal) +'</textarea>';
+    html += '</div>';
     html += '<button class="reveal-btn" id="revealBtn">查看答案</button>';
   }
   html += '</div>';
+  html += '<div class="swipe-hint">← 左右滑动切换题目 →</div>';
 
   main.innerHTML = html;
+
+  const practiceInput = document.getElementById('practiceInput');
+  if(practiceInput){
+    practiceInput.addEventListener('input', ()=>{
+      state.drafts[item.id] = practiceInput.value;
+      storeSet('drafts', state.drafts);
+    });
+  }
 
   const revealBtn = document.getElementById('revealBtn');
   if(revealBtn){
     revealBtn.addEventListener('click', ()=>{
+      if(practiceInput){
+        state.drafts[item.id] = practiceInput.value;
+        storeSet('drafts', state.drafts);
+      }
       state.revealed[item.id] = true;
       render();
     });
   }
+  setupSwipe();
   const starBtn = main.querySelector('[data-star]');
   starBtn.addEventListener('click', async ()=>{
     state.stars[item.id] = !state.stars[item.id];
@@ -797,6 +859,67 @@ function render(){
   });
 
   document.getElementById('prevBtn').disabled = state.index === 0;
+}
+
+// ---------- Swipe to switch question ----------
+function setupSwipe(){
+  const card = document.getElementById('questionCard');
+  if(!card) return;
+  let startX = 0, startY = 0, deltaX = 0, isSwiping = false, isHorizontal = null;
+  const threshold = 60;
+
+  card.addEventListener('touchstart', (e)=>{
+    if(state.mode !== 'single') return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    deltaX = 0;
+    isHorizontal = null;
+    isSwiping = true;
+  }, {passive:true});
+
+  card.addEventListener('touchmove', (e)=>{
+    if(!isSwiping || state.mode !== 'single') return;
+    deltaX = e.touches[0].clientX - startX;
+    const deltaY = e.touches[0].clientY - startY;
+    if(isHorizontal === null){
+      isHorizontal = Math.abs(deltaX) > Math.abs(deltaY) + 4;
+    }
+    if(isHorizontal){
+      card.classList.add('swiping');
+      card.style.transform = 'translateX(' + deltaX + 'px) rotate(' + (deltaX/40) + 'deg)';
+      card.style.opacity = String(1 - Math.min(Math.abs(deltaX)/280, 0.55));
+    }
+  }, {passive:true});
+
+  function endSwipe(){
+    if(!isSwiping || state.mode !== 'single') return;
+    isSwiping = false;
+    card.classList.remove('swiping');
+    card.classList.add('swipe-return');
+    if(isHorizontal && deltaX < -threshold){
+      const list = visibleList();
+      card.style.transform = 'translateX(-130%) rotate(-8deg)';
+      card.style.opacity = '0';
+      setTimeout(()=>{
+        if(state.index < list.length - 1){ state.index++; storeSet('lastIndex', state.index); }
+        else { showToast('已经是最后一题啦'); }
+        render();
+      }, 200);
+    } else if(isHorizontal && deltaX > threshold){
+      card.style.transform = 'translateX(130%) rotate(8deg)';
+      card.style.opacity = '0';
+      setTimeout(()=>{
+        if(state.index > 0){ state.index--; storeSet('lastIndex', state.index); }
+        render();
+      }, 200);
+    } else {
+      card.style.transform = 'translateX(0) rotate(0)';
+      card.style.opacity = '1';
+    }
+  }
+
+  card.addEventListener('touchend', endSwipe);
+  card.addEventListener('touchcancel', endSwipe);
 }
 
 function escapeHtml(str){
@@ -890,9 +1013,11 @@ document.getElementById('gridOverlay').addEventListener('click', (e)=>{
   const savedStars = await storeGet('stars');
   const savedStatus = await storeGet('status');
   const savedIndex = await storeGet('lastIndex');
+  const savedDrafts = await storeGet('drafts');
   if(savedStars) state.stars = savedStars;
   if(savedStatus) state.status = savedStatus;
   if(typeof savedIndex === 'number') state.index = savedIndex;
+  if(savedDrafts) state.drafts = savedDrafts;
   render();
 })();
 
