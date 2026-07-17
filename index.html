@@ -867,6 +867,7 @@ function setupSwipe(){
   if(!card) return;
   let startX = 0, startY = 0, deltaX = 0, isSwiping = false, isHorizontal = null;
   const threshold = 60;
+  const decideThreshold = 10; // 累计滑动超过这个距离才判断方向,避免手指抖动误判
 
   card.addEventListener('touchstart', (e)=>{
     if(state.mode !== 'single') return;
@@ -881,22 +882,28 @@ function setupSwipe(){
     if(!isSwiping || state.mode !== 'single') return;
     deltaX = e.touches[0].clientX - startX;
     const deltaY = e.touches[0].clientY - startY;
+
     if(isHorizontal === null){
-      isHorizontal = Math.abs(deltaX) > Math.abs(deltaY) + 4;
+      const dist = Math.sqrt(deltaX*deltaX + deltaY*deltaY);
+      if(dist < decideThreshold) return; // 还太小,先不判断方向,让浏览器保留纵向滚动能力
+      isHorizontal = Math.abs(deltaX) > Math.abs(deltaY);
+      if(!isHorizontal){ isSwiping = false; return; } // 判定为纵向滚动,交还给浏览器原生滚动
     }
+
     if(isHorizontal){
+      e.preventDefault(); // 阻止页面在横滑过程中跟着上下滚动
       card.classList.add('swiping');
       card.style.transform = 'translateX(' + deltaX + 'px) rotate(' + (deltaX/40) + 'deg)';
       card.style.opacity = String(1 - Math.min(Math.abs(deltaX)/280, 0.55));
     }
-  }, {passive:true});
+  }, {passive:false});
 
   function endSwipe(){
-    if(!isSwiping || state.mode !== 'single') return;
+    if(!isSwiping || state.mode !== 'single' || !isHorizontal){ isSwiping = false; return; }
     isSwiping = false;
     card.classList.remove('swiping');
     card.classList.add('swipe-return');
-    if(isHorizontal && deltaX < -threshold){
+    if(deltaX < -threshold){
       const list = visibleList();
       card.style.transform = 'translateX(-130%) rotate(-8deg)';
       card.style.opacity = '0';
@@ -905,7 +912,7 @@ function setupSwipe(){
         else { showToast('已经是最后一题啦'); }
         render();
       }, 200);
-    } else if(isHorizontal && deltaX > threshold){
+    } else if(deltaX > threshold){
       card.style.transform = 'translateX(130%) rotate(8deg)';
       card.style.opacity = '0';
       setTimeout(()=>{
